@@ -89,6 +89,17 @@ class ReviewFlowTests(unittest.TestCase):
         self.assertIn("Google", llm.prompts[0])
         self.assertEqual(llm.max_tokens, [140])
 
+    def test_generate_review_retries_once_when_model_returns_empty_text(self):
+        llm = FakeLlmClient(["   ", " Great service and a clean space. "])
+
+        result = asyncio.run(generate_review(["服务好"], PLATFORM_GOOGLE, llm))
+
+        self.assertEqual(
+            result,
+            {"text": "Great service and a clean space.", "platform": PLATFORM_GOOGLE},
+        )
+        self.assertEqual(llm.max_tokens, [140, 560])
+
     def test_generate_xiaohongshu_uses_short_completion_budget(self):
         llm = FakeLlmClient([" 今天喝到一杯很清爽的奶茶，出餐快，颜值也在线～ "])
 

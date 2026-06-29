@@ -112,8 +112,16 @@ export function buildWeComWebhookRequest({ review, platform, feelings }) {
   };
 }
 
-export function generateReview(payload) {
-  return postJson('/api/generate-review', payload);
+export async function generateReview(payload) {
+  const result = await postJson('/api/generate-review', payload);
+  const text = typeof result.text === 'string' ? result.text.trim() : '';
+  if (!text) {
+    throw new Error('模型返回内容为空，请稍后重试或检查模型配置。');
+  }
+  return {
+    ...result,
+    text,
+  };
 }
 
 export async function notifyWeCom(payload) {

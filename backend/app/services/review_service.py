@@ -18,6 +18,9 @@ from app.core.domain import (
 )
 
 
+EMPTY_COMPLETION_RETRY_MULTIPLIER = 4
+
+
 class LlmClient(Protocol):
     async def complete(self, prompt: str, max_tokens: int | None = None) -> str:
         """Return completion text for a prompt."""
@@ -40,7 +43,17 @@ async def generate_review(
 ) -> dict[str, str]:
     normalized = validate_generation_input(feelings, platform)
     prompt = build_review_prompt(normalized, platform)
-    text = (await llm_client.complete(prompt, max_tokens=get_generation_max_tokens(platform))).strip()
+    max_tokens = get_generation_max_tokens(platform)
+    text = (await llm_client.complete(prompt, max_tokens=max_tokens)).strip()
+    if not text:
+        text = (
+            await llm_client.complete(
+                prompt,
+                max_tokens=max_tokens * EMPTY_COMPLETION_RETRY_MULTIPLIER,
+            )
+        ).strip()
+    if not text:
+        raise RuntimeError("LLM returned empty completion text")
     return {"text": text, "platform": platform}
 
 

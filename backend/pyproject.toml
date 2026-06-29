@@ -1,0 +1,14 @@
+[project]
+name = "culture-media-backend"
+version = "0.1.0"
+description = "Sunny Tea House AI review demo backend"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "psycopg[binary]==3.2.3",
+    "python-dotenv==1.2.2",
+    "uvicorn[standard]==0.34.0",
+]
+
+[tool.uv]
+package = false

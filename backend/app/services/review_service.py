@@ -18,9 +18,6 @@ from app.core.domain import (
 )
 
 
-EMPTY_COMPLETION_RETRY_MULTIPLIER = 4
-
-
 class LlmClient(Protocol):
     async def complete(self, prompt: str, max_tokens: int | None = None) -> str:
         """Return completion text for a prompt."""
@@ -49,7 +46,7 @@ async def generate_review(
         text = (
             await llm_client.complete(
                 prompt,
-                max_tokens=max_tokens * EMPTY_COMPLETION_RETRY_MULTIPLIER,
+                max_tokens=max_tokens,
             )
         ).strip()
     if not text:

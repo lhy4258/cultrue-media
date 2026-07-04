@@ -1,168 +1,409 @@
-# AI 评价生成 Demo 项目文档
+# AI 评价生成 Demo 本地交付文档
 
-## 1. AI 辅助编程工具使用策略
+## 1. 项目概述
 
-本项目使用 Codex 进行需求拆解、架构规划、测试优先的后端实现、前端移动端界面搭建和交付文档整理。当前演示策略调整为“真实模型生成 + 前端 Webhook mock”：评价生成允许接入真实大模型，企业微信机器人不做真实接入，只在前端展示 Webhook 数据拼凑与模拟调用逻辑。
+本项目实现了一个本地运行的移动端 H5 Demo，用于帮助 Sunny Tea House 顾客快速生成平台评价或推荐文案。用户选择 1-2 个消费感受，再选择 Google 或小红书，前端请求 FastAPI 后端调用真实大模型生成内容。用户可以继续手动编辑正文，然后一键复制，并在页面内查看企业微信 Webhook 的 mock 请求拼装结果，最后跳转到对应平台入口。
 
-AI 主要用于：
+当前交付模式为：
 
-- 从需求文档中提取用户流程、接口边界和评分重点。
-- 生成后端业务测试，先验证 1-2 个感受限制、平台限制、Prompt 选择和历史 Webhook 路径。
-- 协助编写 Vue 移动端界面和状态反馈，避免空白失败和不可恢复状态。
-- 整理 API Key 安全、Prompt 调优、Webhook mock 演示和部署说明。
+- 前端：Vue 3 + Vite 移动端 H5，本机访问 `http://127.0.0.1:5173`。
+- 后端：Python FastAPI，本机访问 `http://127.0.0.1:8000`。
+- 模型：后端读取 `backend/.env` 中的模型环境变量，调用 OpenAI-compatible 模型接口。
+- 企业微信：不接入真实企业微信群机器人，改为纯前端 mock 演示 Webhook 数据拼装与调用逻辑。
+- 数据库：本地 Docker PostgreSQL 已预留 `reviews` 表和 `/api/incoming-review` 接口；当前主流程不依赖数据库。
 
-人工判断主要用于：
-
-- 确认技术路线为 Vue/Vite 前端 + Python FastAPI 后端。
-- 确认真实模型调用可以接入，真实企业微信群机器人 Webhook 当前不接入，改为前端 mock 演示。
-- 将 PinMe 限定为 Vue/Vite 静态前端部署候选，Python 后端部署后续单独确认。
-
-## 2. Prompt 设计思路与调优过程
-
-后端将平台拆成两套 Prompt，避免同一个 Prompt 同时兼容英文 Google 评论和中文小红书笔记导致风格折中。
-
-Google Prompt 的设计目标：
-
-- 英文输出。
-- 使用北美本地真实消费者口吻。
-- 语气客观、具体、温和。
-- AI 生成阶段控制在约 45-75 个英文词，并通过 `max_tokens` 控制输出长度和 token 消耗。
-- 避免过度营销、优惠引导、AI 痕迹和任务说明。
-
-小红书 Prompt 的设计目标：
-
-- 中文输出。
-- 输出推荐文案，符合“种草笔记”语感。
-- 适量使用 Emoji。
-- 段落有留白和呼吸感。
-- AI 生成阶段控制在约 80-140 个中文字符，并通过 `max_tokens` 控制输出长度和 token 消耗。
-- 像真实用户分享，而不是商家广告。
-
-历史后端预留的 Webhook 分析 Prompt 单独设计，不复用评价生成 Prompt。它要求模型严格返回两行：
+本地地址：
 
 ```text
-中文摘要：用一句中文概括顾客主要反馈
-商家回复草稿：用一句亲切、专业、不夸张的中文回复顾客
+前端页面：http://127.0.0.1:5173
+后端接口：http://127.0.0.1:8000
+后端健康检查：http://127.0.0.1:8000/api/health
 ```
 
-这样后端可以用确定性解析逻辑提取摘要与回复草稿，避免再用模型做路由或状态判断。当前交付的企业微信演示不调用真实后端 Webhook，只在前端 mock 中生成摘要、回复草稿和请求体。
+说明：本项目已解除 Render 后端和 PinMe 前端部署，文档与配置已改回本机回环地址。
 
-## 3. 自动化工作流与 Webhook
+## 2. AI 辅助编程工具使用策略
 
-当前交付版本中，顾客点击“生成内容”时，前端会请求后端 `/api/generate-review`，由 FastAPI 使用 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL` 调用真实模型。Google 生成英文评价，小红书生成推荐文案；生成阶段会通过 Prompt 和 `max_tokens` 控制输出长度，用来减少 token 消耗。这个限制只作用于 AI 生成内容，不限制用户生成后手动修改的最终发布内容长度。生成成功后不能再次生成，只能在文本框中手动修改。顾客点击“复制并模拟 Webhook”后，前端先复制最终正文。复制成功后在纯前端执行 mock 调用逻辑：
+本项目使用 Codex 参与需求阅读、方案拆解、代码实现、调试验证和交付文档整理。AI 工具主要承担高重复度、结构化和跨文件联动工作，关键技术路线和范围调整由人工确认。
 
-1. 前端根据评价正文、平台和感受标签生成中文摘要。
-2. 前端生成商家回复草稿。
-3. 前端按企业微信群机器人 Markdown 消息格式拼装 JSON body。
-4. 前端展示 mock 请求地址、请求方式、请求 body 和 mock 调用状态。
-5. 用户可单独点击“打开发布入口”跳转到 Google 或小红书入口。
+AI 参与内容：
 
-当前版本不发送真实企业微信消息，不需要 `WECOM_WEBHOOK_URL`。页面展示的是如果接入真实企微机器人时应该发送的 payload。真实模型生成需要后端服务；企业微信 Webhook 演示不需要后端参与。
+- 从需求文档中提取核心闭环：选择感受、选择平台、生成评价、用户编辑、复制、跳转平台、Webhook 演示。
+- 规划前后端分离结构，前端使用 Vue/Vite，后端使用 FastAPI。
+- 编写后端单元测试，覆盖平台校验、感受数量限制、Prompt 选择、空模型返回重试、Webhook 预留逻辑和 PostgreSQL 预留仓库。
+- 搭建移动端页面，补充 loading、失败提示、复制失败提示、后退后可继续操作、生成后只能手动修改等状态。
+- 整理本地启动命令、依赖导入路径、接口地址、未完成项和本交付文档。
 
-此前实现的后端 `/api/incoming-review` 和 PostgreSQL `reviews` 表保留为后续真实接入基础，但不作为当前演示的必需运行条件。
+人工确认内容：
 
-## 4. API Key 安全与用量成本处理
+- 真实模型可以接入。
+- 真实企业微信不接入，改为纯前端 mock 展示 Webhook 拼装逻辑。
+- 已解除线上 Render/PinMe 部署，项目恢复为本地回环访问。
+- 当前生成接口不再设置 `max_tokens`，只在内部 Prompt 中限制输出字数范围。
 
-当前版本允许接入真实模型，因此需要在后端配置模型 API Key。前端不保存模型 API Key，只通过 `/api/generate-review` 调用 FastAPI 后端；后端通过环境变量读取：
+## 3. 功能实现说明
 
-- `LLM_API_KEY`
-- `LLM_BASE_URL`
-- `LLM_MODEL`
-- `LLM_TIMEOUT_SECONDS`
-- `DATABASE_URL`
-- `API_RATE_LIMIT_PER_MINUTE`
-- `LLM_DAILY_REQUEST_WARNING_LIMIT`
-- `API_USAGE_LOG_PATH`
-- `FRONTEND_ORIGINS`
+### 3.1 前端功能
 
-当前版本不接入真实企业微信机器人，因此不需要配置 `WECOM_WEBHOOK_URL`。
+前端主页面实现了完整移动端流程：
 
-成本控制方式：
+- 消费感受标签：最多选择 2 个，至少选择 1 个才允许生成。
+- 平台切换：Google 和小红书两种模式。
+- 生成内容：调用后端 `/api/generate-review-stream`，模型文本以流式片段实时追加到文本框；生成成功后锁定生成按钮，后续只能手动编辑。
+- 可编辑正文：用户可以直接修改 AI 生成内容，最终发布内容不限制长度。
+- 复制并模拟 Webhook：复制正文后，在前端构造企业微信机器人 Markdown 请求体，并展示请求方式、模拟地址、中文摘要、回复草稿和 JSON body。
+- 打开发布入口：Google 打开 Google Maps/Search 入口，小红书打开网页入口，不做内容预填。
+- 页面后退恢复：从平台入口后退回评价页面后，仍可再次点击“打开发布入口”和“复制并模拟 Webhook”。
 
-- 每次流程只允许成功生成一次，不做多候选生成；后续修改必须由用户手动编辑。
-- Google 和小红书的生成接口分别传入短输出 `max_tokens`，只限制 AI 输出长度，不限制用户最终发布内容长度。
+### 3.2 后端接口
+
+后端提供以下接口：
+
+```text
+GET /api/health
+POST /api/generate-review
+POST /api/generate-review-stream
+POST /api/notify-wecom
+POST /api/incoming-review
+```
+
+当前主流程实际使用：
+
+```text
+GET /api/health
+POST /api/generate-review-stream
+```
+
+`POST /api/generate-review-stream` 请求示例：
+
+```json
+{
+  "feelings": ["服务好"],
+  "platform": "google"
+}
+```
+
+流式响应示例：
+
+```text
+event: chunk
+data: {"text":"Generated"}
+
+event: chunk
+data: {"text":" review text"}
+
+event: done
+data: {"platform":"google"}
+```
+
+`/api/generate-review` 是保留的非流式兼容接口。`/api/notify-wecom` 和 `/api/incoming-review` 是后续真实评论来源或真实企微扩展的预留能力。当前前端不调用真实企微接口，企业微信演示全部在前端 mock 完成。
+
+## 4. Prompt 设计与调优过程
+
+后端按平台拆分两套评价生成 Prompt。
+
+Google Prompt 目标：
+
+- 输出英文评价。
+- 使用北美真实消费者口吻。
+- 内容客观、自然、具体，不像广告。
+- 输出不少于 50 个英文字符，最多 100 个英文字符。
+- 不提 AI、提示词、折扣或任务说明。
+
+小红书 Prompt 目标：
+
+- 输出中文推荐文案。
+- 风格接近真实用户的小红书种草笔记。
+- 适量 Emoji，分段有留白。
+- 输出不少于 80 个中文字符，最多 300 个中文字符。
+- 不提 AI、提示词、系统说明。
+
+调优记录：
+
+- 初始版本曾通过 `max_tokens` 控制输出预算，但用户体验上仍然属于 token 限制。
+- 当前版本移除生成接口的 `max_tokens` 参数，避免在请求层限制模型输出预算。
+- 字数控制全部写入内部 Prompt：Google 为 50-100 个英文字符，小红书为 80-300 个中文字符。
+- 后端仍保留空内容防护：非流式接口如果模型第一次返回空正文，会在不传 `max_tokens` 的情况下重试一次；流式接口如果模型没有输出内容，会返回错误事件，不再让前端误判成功。
+
+### 4.1 取消 token 限制的具体改动
+
+本次调整前，生成接口曾通过 `max_tokens` 控制模型输出预算。虽然这种方式可以限制模型生成成本，但它本质上仍然是 token 层面的硬限制，容易带来两个问题：一是用户感知上仍然像“被 token 卡住”，二是部分兼容代理或推理模型可能因为预算策略导致正文为空。
+
+当前版本改为：
+
+- `backend/app/integrations/llm.py` 中的 `OpenAICompatibleClient.complete()` 不再接收 `max_tokens` 参数。
+- 发送到模型 `/chat/completions` 的 JSON payload 不再包含 `max_tokens` 字段。
+- `backend/app/services/review_service.py` 调用模型时只传 Prompt，不传输出预算。
+- `backend/app/core/domain.py` 在 Google 和小红书两套 Prompt 内部写清字数要求。
+- 前端提示文案从“减少 token 消耗”改为“通过内部提示词控制字数”。
+
+当前字数规则：
+
+```text
+Google 英文评价：不少于 50 个英文字符，最多 100 个英文字符
+小红书推荐文案：不少于 80 个中文字符，最多 300 个中文字符
+```
+
+需要注意：当前不在后端截断模型输出，也不限制用户最终手动编辑后的发布内容长度。字数要求是生成阶段的 Prompt 约束，最终用户仍可以在文本框中自行增删修改。
+
+### 4.2 流式输出的具体改动
+
+为减少“点击生成后长时间空等”的体验问题，当前前端主流程已切换到流式生成。
+
+后端新增接口：
+
+```text
+POST /api/generate-review-stream
+```
+
+请求体仍然沿用原来的结构：
+
+```json
+{
+  "feelings": ["服务好"],
+  "platform": "google"
+}
+```
+
+后端处理流程：
+
+1. `backend/app/api/routes.py` 接收 `/api/generate-review-stream` 请求。
+2. 路由层继续走限流、调用日志和成本告警逻辑。
+3. `backend/app/services/review_service.py` 组装平台 Prompt，并调用 `llm_client.stream_complete(prompt)`。
+4. `backend/app/integrations/llm.py` 向 OpenAI-compatible `/chat/completions` 发送 `stream: true`。
+5. 模型返回的 SSE 行中，后端解析 `choices[0].delta.content`。
+6. FastAPI 使用 `StreamingResponse` 把片段转换成前端可读的 SSE 事件。
+
+后端返回事件格式：
+
+```text
+event: chunk
+data: {"text":"模型返回的一段文本"}
+
+event: done
+data: {"platform":"google"}
+```
+
+如果模型流式调用失败或没有输出内容，后端返回错误事件：
+
+```text
+event: error
+data: {"message":"错误信息"}
+```
+
+前端处理流程：
+
+1. `frontend/src/App.vue` 中点击“生成内容”后，清空旧正文并显示“正在流式生成内容...”。
+2. `frontend/src/api.js` 调用 `fetch('/api/generate-review-stream')`。
+3. 前端通过 `response.body.getReader()` 读取 `ReadableStream`。
+4. `TextDecoder` 将二进制片段转为文本，并按 SSE 的空行分隔事件。
+5. 收到 `chunk` 事件时，将 `data.text` 追加到文本框。
+6. 收到 `done` 后完成生成，锁定生成按钮，后续只能手动修改。
+7. 如果流中断但已经收到部分文本，页面保留当前文本，并提示“生成中断，已保留当前内容，可手动修改”。
+8. 如果完全没有收到正文，则显示“模型返回内容为空”或对应的友好错误。
+
+保留兼容接口：
+
+```text
+POST /api/generate-review
+```
+
+该接口仍返回完整 JSON，用于兼容、调试或后续非流式场景。当前前端主流程不再调用它。
+
+相关代码：
+
+```text
+Prompt 与字数限制：backend/app/core/domain.py
+生成服务与空内容重试：backend/app/services/review_service.py
+模型 HTTP 客户端：backend/app/integrations/llm.py
+```
+
+## 5. Webhook 实现说明
+
+任务原计划包含真实企业微信群机器人 Webhook。实际交付中，用户确认不接入真实企业微信，改为通过纯前端代码 mock 演示，重点展示 webhook 的数据拼凑与调用逻辑。
+
+当前 Webhook mock 流程：
+
+1. 用户点击“复制并模拟 Webhook”。
+2. 前端复制用户最终正文。
+3. 前端根据平台、感受标签和正文生成中文摘要。
+4. 前端生成商家回复草稿。
+5. 前端拼装企业微信群机器人 Markdown JSON body。
+6. 页面展示 mock 请求地址、请求方式、摘要、回复草稿和请求体。
+
+mock 请求地址：
+
+```text
+https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=MOCK_DEMO_KEY
+```
+
+说明：该地址只用于演示，不会真实发送企业微信群消息，也不需要配置 `WECOM_WEBHOOK_URL`。
+
+## 6. API Key 安全与成本控制
+
+模型 API Key 只放在后端 `backend/.env` 中，不进入前端代码，不进入构建产物。
+
+后端环境变量：
+
+```text
+LLM_API_KEY
+LLM_BASE_URL
+LLM_MODEL
+LLM_TIMEOUT_SECONDS
+DATABASE_URL
+API_RATE_LIMIT_PER_MINUTE
+LLM_DAILY_REQUEST_WARNING_LIMIT
+API_USAGE_LOG_PATH
+FRONTEND_ORIGINS
+```
+
+成本控制措施：
+
+- 用户每次流程只允许成功生成一次，生成后只能手动修改。
 - 感受标签限制为 1-2 个，减少 Prompt 发散。
-- Webhook 摘要与回复草稿由前端 mock 生成，不产生企业微信外部调用成本。
-- 后端保留 `LLM_TIMEOUT_SECONDS`，避免请求无限等待。
-- 后端已增加 Demo 级内存限流，默认同一客户端每分钟最多 12 次模型相关请求，超过后返回 429。
-- 后端已增加模型调用审计日志，默认写入 `backend/logs/api-usage.jsonl`，记录接口、平台、感受数量、匿名客户端哈希、状态码和告警事件，不记录 API Key 或评价正文。
-- 后端已增加每日模型请求量告警阈值，默认达到 100 次后写入 `model_cost_warning` 日志，并输出后端 warning。
-- 后续正式上线时仍建议增加网关级限流、验证码或一次性短码、持久化监控和真实成本通知，减少公开 Demo 被刷量风险。
+- Prompt 严格要求短文本输出，避免模型主动输出长文。
+- 后端设置 `LLM_TIMEOUT_SECONDS`，避免模型请求无限等待。
+- 后端加入 Demo 级内存限流，默认同一客户端每分钟最多 12 次模型相关请求。
+- 后端写入模型调用审计日志，默认路径为 `backend/logs/api-usage.jsonl`，不记录 API Key，不记录评价正文。
+- 每日模型请求量达到阈值后写入成本告警日志。
 
-## 5. 实际耗时
+重要说明：当前生成接口不再设置 `max_tokens`，只通过 Prompt 要求短文本输出。用户生成后在文本框里手动修改的最终发布内容不限制长度；如果后续重新公开部署，仍建议接入更强的网关限流、验证码或访问码。
 
-本轮 Codex 实作记录约 2 小时，包括需求阅读、计划确认、后端测试与实现、前端页面搭建、文档整理和本地验证。若后续继续配置真实模型 Key、部署后端、生成正式 PDF 文档，请在最终提交前按实际追加耗时更新。
+## 7. 数据库说明
 
-## 6. 部署说明
-
-前端是 Vue/Vite，构建产物为 `frontend/dist/`，可用于 PinMe 静态上传。没有自有域名时，直接使用 PinMe 生成的访问链接即可。
-
-本地开发时，Vite 已经把 `/api` 代理到 `http://127.0.0.1:8000`。如果前端和后端分开部署，Python FastAPI 后端需要单独部署到支持 Python 常驻服务的平台，并配置模型环境变量；前端生产环境再通过 `VITE_API_BASE_URL` 指向该后端。
-
-推荐发布方式：
+本地 Docker PostgreSQL 已预留数据库和表：
 
 ```text
-前端：PinMe 静态上传 frontend/dist/
-后端：Render、Railway 或其他 Python Web Service 平台
-数据库：后端平台托管 PostgreSQL，或其他公网 PostgreSQL
+容器名：backend-postgres-1
+数据库：culture_media
+用户：postgres
+端口：127.0.0.1:5432
+表：culture_media.public.reviews
 ```
 
-后端平台配置：
+`reviews` 表保存字段包括：
+
+- 平台
+- 外部评论 ID
+- 顾客昵称
+- 评分
+- 感受标签
+- 评论正文
+- 中文摘要
+- 商家回复草稿
+- 企业微信发送状态
+- 创建时间
+
+当前主流程“生成评价 -> 复制 -> mock Webhook -> 跳转平台”不依赖数据库。FastAPI 启动时如果数据库 schema 初始化失败，只写 warning，不阻塞后端启动。数据库只用于后续真实评论来源和入库扩展。
+
+## 8. 本地运行说明
+
+### 8.1 后端
+
+后端运行地址：
 
 ```text
-Root Directory: backend
-Python Version: 3.11
-Build Command: pip install -r requirements.txt
-Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+http://127.0.0.1:8000
 ```
 
-后端线上环境变量：
+后端环境变量示例：
 
 ```text
-LLM_API_KEY=真实模型key
-LLM_BASE_URL=模型base_url
-LLM_MODEL=模型名
+LLM_API_KEY=真实模型 Key
+LLM_BASE_URL=真实模型 Base URL
+LLM_MODEL=真实模型名称
 LLM_TIMEOUT_SECONDS=30
-DATABASE_URL=线上PostgreSQL连接串
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/culture_media
 API_RATE_LIMIT_PER_MINUTE=12
 LLM_DAILY_REQUEST_WARNING_LIMIT=100
 API_USAGE_LOG_PATH=logs/api-usage.jsonl
-FRONTEND_ORIGINS=https://pinme.eth.limo
+FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-`FRONTEND_ORIGINS` 填前端访问链接的 origin。比如 PinMe 预览链接是 `https://pinme.eth.limo/#/preview/xxx`，这里填 `https://pinme.eth.limo`；如果误填完整链接，后端也会自动取 origin。
+启动命令：
 
-前端生产环境配置：复制 `frontend/.env.production.example` 为 `frontend/.env.production`，并填写后端平台地址。
+```powershell
+cd "C:\Users\36183\Desktop\boss\culture media\backend"
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+健康检查：
 
 ```text
-VITE_API_BASE_URL=https://你的后端平台地址
+http://127.0.0.1:8000/api/health
 ```
 
-本阶段不强行把 Python 后端放入 PinMe 全栈路径，因为当前 PinMe 全栈模板更偏 React/Vite + Worker 后端；为避免部署方案失真，前后端部署先解耦。
+### 8.2 前端
 
-## 7. 未完成功能与待补充内容
+前端运行地址：
 
-当前 Demo 的前后端主流程、接口结构、后端单元测试、前端本地构建和无 Key 状态下的页面验证已经完成。下面这些事项还没有最终完成，主要原因是需要真实模型配置、正式部署环境或最终交付要求确认。
+```text
+http://127.0.0.1:5173
+```
 
-| 类型 | 未完成项 | 当前状态 | 后续处理 |
-| --- | --- | --- | --- |
-| 真实模型调用 | 接入可用的 `LLM_API_KEY` 并完成真实生成验证 | 当前已经允许接入真实模型，前端会调用后端 `/api/generate-review` | 在 `backend/.env` 填入真实 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 后，用手机视口重新验证 |
-| 企微推送 | 使用真实企业微信群机器人 Webhook 验证消息到群 | 当前不作为交付目标，不接入真实企业微信机器人；只展示 Webhook payload 拼装和 mock 调用结果 | 保持前端 mock 演示即可，不配置 `WECOM_WEBHOOK_URL` |
-| 真实评论来源 | 自动收到 Google/小红书的新评论 | 后端已提供 `/api/incoming-review` 接收入口和入库基础；还没有接 Google Business Profile API 或小红书实际来源 | 后续拿到平台授权或第三方评论来源后，把新评论转发到 `/api/incoming-review` |
-| 生产部署 | 前端和后端正式上线 | 前端 `frontend/dist/` 可作为 PinMe 静态上传目标；后端支持通过 `FRONTEND_ORIGINS` 放行平台自带前端域名 | 选择 Render、Fly、Railway、云函数或其他 Python 服务平台，配置环境变量，再给前端设置 `VITE_API_BASE_URL` |
-| 平台入口 | 替换成真实、最准确的商家发布入口 | Google 当前打开 Sunny Tea House San Jose 的 Google Maps/Search 入口；小红书当前打开网页入口，不做内容预填 | 拿到 Google 商家评论链接或 Place ID 后替换；如有小红书官方账号或可识别 App 链接，也可替换当前入口 |
-| 正式端到端验收 | 使用真实模型 Key、手机视口完成完整闭环截图 | 已完成本地无 Key 友好错误、手动编辑、按钮状态和构建验证；真实模型调用未验收 | 配置真实模型环境变量后，按“选择感受 -> 生成 -> 编辑 -> 复制并模拟 Webhook -> 平台跳转”重新截图验收 |
-| 上线安全 | 公开 Demo 的滥用防护和日志监控 | 已补 Demo 级内存限流、调用日志和每日请求量告警；还没有登录、验证码、网关级限流或外部告警通知 | 上线前增加网关级限流、验证码、持久化监控和真实成本通知，避免公开链接被刷模型调用 |
-| 前端自动化测试 | 前端端到端自动化测试脚本 | 已做浏览器人工验证和 Vite 构建，尚未补 Playwright/Cypress 自动化用例 | 如需要长期维护，补充移动端 375px 视口下的生成失败、复制成功、推送失败、平台切换用例 |
-| 正式交付 PDF | 将 Markdown 交付文档导出为 PDF | 当前交付文档是 Markdown 格式，尚未导出 PDF | 若老师或交付方要求 PDF，需要按字体规则导出并检查字体、字号和空行 |
+Vite 开发环境已将 `/api` 代理到：
 
-后续真实接入优先级建议：
+```text
+http://127.0.0.1:8000
+```
 
-1. 先配置真实 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`，验证后端可以生成 Google 与小红书两种风格。
-2. 再确定后端部署平台，并把前端生产环境的 `VITE_API_BASE_URL` 指向线上后端。
-3. 企业微信保持前端 mock，不进入当前交付范围。
+本地生产构建配置：
 
-## 8. 本地启动与依赖导入命令
+```text
+frontend/.env.production
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+启动命令：
+
+```powershell
+cd "C:\Users\36183\Desktop\boss\culture media\frontend"
+pnpm install
+pnpm dev
+```
+
+构建命令：
+
+```powershell
+cd "C:\Users\36183\Desktop\boss\culture media\frontend"
+pnpm build
+```
+
+## 9. 测试与验证记录
+
+后端测试命令：
+
+```powershell
+cd "C:\Users\36183\Desktop\boss\culture media"
+.\backend\.venv\Scripts\python.exe -X utf8 -m unittest discover -s backend\tests -t backend -v
+```
+
+最近验证结果：
+
+```text
+27 个测试通过
+1 个 PostgreSQL 集成测试按配置跳过
+```
+
+前端构建命令：
+
+```powershell
+cd "C:\Users\36183\Desktop\boss\culture media\frontend"
+pnpm build
+```
+
+已完成验证：
+
+- 后端健康检查使用 `http://127.0.0.1:8000/api/health`。
+- 前端开发服务使用 `http://127.0.0.1:5173`。
+- 前端 `/api` 请求通过 Vite proxy 访问本地 FastAPI。
+- 真实模型生成已跑通，当前生成接口已取消 `max_tokens` 参数，改为只通过内部 Prompt 控制字数；前端主流程已切换为流式输出。
+- 流式生成链路已验证：后端发送 SSE `chunk/done/error` 事件，前端边接收边追加到文本框。
+- 生成成功后按钮锁定，只能手动修改。
+- 从平台入口后退回页面后，仍可再次点击“打开发布入口”和“复制并模拟 Webhook”。
+
+## 10. 本地启动与依赖导入命令
 
 项目根目录：
 
@@ -186,130 +427,51 @@ uv pip install --python ".\.venv\Scripts\python.exe" -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-后端常用文件路径：
-
-```text
-后端依赖配置：C:\Users\36183\Desktop\boss\culture media\backend\pyproject.toml
-后端环境变量：C:\Users\36183\Desktop\boss\culture media\backend\.env
-后端环境变量示例：C:\Users\36183\Desktop\boss\culture media\backend\.env.example
-后端应用入口：C:\Users\36183\Desktop\boss\culture media\backend\app\main.py
-后端接口路由：C:\Users\36183\Desktop\boss\culture media\backend\app\api\routes.py
-后端 Prompt 与校验：C:\Users\36183\Desktop\boss\culture media\backend\app\core\domain.py
-后端数据库仓库：C:\Users\36183\Desktop\boss\culture media\backend\app\repositories\reviews.py
-后端测试文件：C:\Users\36183\Desktop\boss\culture media\backend\tests\test_review_flow.py
-后端数据库测试：C:\Users\36183\Desktop\boss\culture media\backend\tests\test_postgres_repository.py
-```
-
-后端启动：
-
-```powershell
-cd "C:\Users\36183\Desktop\boss\culture media\backend"
-.\.venv\Scripts\Activate.ps1
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-前端依赖导入与启动：
+前端依赖导入：
 
 ```powershell
 cd "C:\Users\36183\Desktop\boss\culture media\frontend"
 pnpm install
-pnpm dev
 ```
 
-前端常用文件路径：
-
-```text
-前端依赖配置：C:\Users\36183\Desktop\boss\culture media\frontend\package.json
-前端 Vite 配置：C:\Users\36183\Desktop\boss\culture media\frontend\vite.config.js
-前端页面入口：C:\Users\36183\Desktop\boss\culture media\frontend\src\App.vue
-前端 API 封装：C:\Users\36183\Desktop\boss\culture media\frontend\src\api.js
-前端样式文件：C:\Users\36183\Desktop\boss\culture media\frontend\src\styles.css
-```
-
-本地访问地址：
-
-```text
-后端健康检查：http://127.0.0.1:8000/api/health
-前端页面：http://127.0.0.1:5173
-```
-
-不要使用 `uv add --package culture media fastapi`。`culture media` 是本地文件夹名，不是合法的 uv 包名；后端依赖记录在 `backend/requirements.txt` 和 `backend/pyproject.toml`，安装时要显式指定 `backend/.venv` 的 Python。
-
-也不要在本项目根目录执行普通 `uv sync`，它可能会按 workspace 规则创建根目录 `.venv`。本项目后端解释器固定使用 `backend/.venv`，依赖导入请使用：
+不要使用：
 
 ```powershell
-cd "C:\Users\36183\Desktop\boss\culture media\backend"
-uv pip install --python ".\.venv\Scripts\python.exe" -r requirements.txt
+uv add --package culture media fastapi
 ```
 
-## 9. PostgreSQL 评论表与新评论接口
+原因：`culture media` 是本地文件夹名，不是合法 uv 包名。后端依赖已写在 `backend/requirements.txt` 和 `backend/pyproject.toml`，导入依赖时固定安装到 `backend/.venv`。
 
-当前使用 Docker 中已经运行的 PostgreSQL：
-
-```text
-容器名：backend-postgres-1
-镜像：pgvector/pgvector:pg16
-数据库：culture_media
-用户：postgres
-密码：postgres
-端口：127.0.0.1:5432
-连接串：postgresql://postgres:postgres@127.0.0.1:5432/culture_media
-```
-
-后端启动时会自动在 `culture_media.public` 下创建 `reviews` 表。表中保存：
-
-- `source`：来源，`generated` 表示前端生成评价后复制触发，`incoming` 表示外部新评论接入。
-- `platform`：平台，当前支持 `google` 和 `xiaohongshu`。
-- `external_review_id`：平台或外部系统传来的评论 ID。
-- `author`：顾客昵称。
-- `rating`：评分。
-- `feelings`：感受标签，JSON 数组。
-- `review_text`：原始评论正文。
-- `summary`：中文摘要。
-- `reply_draft`：商家回复草稿。
-- `wecom_sent`：历史字段；当前不配置真实企业微信机器人时为 `false`。
-- `created_at`：入库时间。
-
-新评论接口：
-
-```text
-POST /api/incoming-review
-```
-
-请求示例：
-
-```json
-{
-  "platform": "google",
-  "reviewId": "google-review-001",
-  "author": "Alice",
-  "rating": 5,
-  "review": "Milk tea tasted great and the team was friendly.",
-  "feelings": []
-}
-```
-
-响应示例：
-
-```json
-{
-  "id": 3,
-  "sent": false,
-  "summary": "顾客喜欢饮品和服务。",
-  "replyDraft": "感谢您的支持，欢迎下次再来。"
-}
-```
-
-查看最近入库记录：
-
-```powershell
-docker exec backend-postgres-1 psql -U postgres -d culture_media -c "SELECT id, source, platform, external_review_id, author, rating, summary, wecom_sent, created_at FROM reviews ORDER BY id DESC LIMIT 5;"
-```
-
-## 10. 文档文件路径
+## 11. 主要文件路径
 
 ```text
 项目说明：C:\Users\36183\Desktop\boss\culture media\README.md
-交付文档草稿：C:\Users\36183\Desktop\boss\culture media\docs\project-document.md
-原始需求 PDF：C:\Users\36183\Desktop\boss\culture media\AI评价生成Demo(2)(2)(1)(1)(1).pdf
+交付文档：C:\Users\36183\Desktop\boss\culture media\docs\project-document.md
+后端入口：C:\Users\36183\Desktop\boss\culture media\backend\app\main.py
+后端路由：C:\Users\36183\Desktop\boss\culture media\backend\app\api\routes.py
+Prompt 与字数限制：C:\Users\36183\Desktop\boss\culture media\backend\app\core\domain.py
+模型客户端：C:\Users\36183\Desktop\boss\culture media\backend\app\integrations\llm.py
+业务服务：C:\Users\36183\Desktop\boss\culture media\backend\app\services\review_service.py
+数据库仓库：C:\Users\36183\Desktop\boss\culture media\backend\app\repositories\reviews.py
+后端测试：C:\Users\36183\Desktop\boss\culture media\backend\tests
+前端页面：C:\Users\36183\Desktop\boss\culture media\frontend\src\App.vue
+前端 API：C:\Users\36183\Desktop\boss\culture media\frontend\src\api.js
+前端生产配置：C:\Users\36183\Desktop\boss\culture media\frontend\.env.production
 ```
+
+## 12. 未完成与后续扩展
+
+当前任务书要求的 Demo 主流程已恢复为本地运行。剩余内容属于后续扩展或正式运营增强：
+
+| 类型 | 当前状态 | 后续处理 |
+| --- | --- | --- |
+| 真实企业微信机器人 | 本次不接入真实机器人，只做前端 mock | 如果后续要真实推送，需要重新启用后端 `WECOM_WEBHOOK_URL` 并调用 `/api/notify-wecom` |
+| 真实评论来源 | 已预留 `/api/incoming-review` 和 `reviews` 表，没有接 Google Business Profile API 或小红书真实来源 | 拿到平台授权或第三方评论来源后，把新评论转发到 `/api/incoming-review` |
+| 数据库扩展 | 本地 Docker PostgreSQL 已可用；当前主流程不强依赖数据库 | 如需保存评论记录，保持本地 PostgreSQL 可用即可 |
+| 成本防护 | 已有 Demo 级限流和调用日志 | 如果后续重新公开部署，建议加验证码、访问码、网关级限流和真实成本告警 |
+| 自动化前端测试 | 已做人工浏览器验证和构建验证 | 如长期维护，可补 Playwright/Cypress 自动化用例 |
+| PDF 交付 | 已额外导出 PDF | 如果内容继续变化，需要重新导出 PDF |
+
+## 13. 实际耗时
+
+本项目从需求阅读、方案制定、前后端开发、真实模型调试、本地化配置、模型空返回问题排查到文档整理，累计约 4-5 小时。主要耗时集中在真实模型联调、模型返回空正文排查和接口地址配置修复。

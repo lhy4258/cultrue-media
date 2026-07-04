@@ -47,6 +47,11 @@ class ApiUsagePolicyTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 429)
         self.assertEqual(context.exception.detail, "请求太频繁，请稍后再试。")
 
+    def test_sse_event_formats_json_payload(self):
+        event = routes._sse_event("chunk", {"text": "你好"})
+
+        self.assertEqual(event, 'event: chunk\ndata: {"text":"你好"}\n\n')
+
 
 if __name__ == "__main__":
     unittest.main()

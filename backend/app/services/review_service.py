@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Protocol
 
 from app.core.domain import (
@@ -9,7 +10,6 @@ from app.core.domain import (
     build_wecom_prompt,
     format_incoming_review_markdown,
     format_wecom_markdown,
-    get_generation_max_tokens,
     normalize_optional_feelings,
     parse_wecom_analysis,
     validate_platform,
@@ -19,8 +19,11 @@ from app.core.domain import (
 
 
 class LlmClient(Protocol):
-    async def complete(self, prompt: str, max_tokens: int | None = None) -> str:
+    async def complete(self, prompt: str) -> str:
         """Return completion text for a prompt."""
+
+    def stream_complete(self, prompt: str) -> AsyncIterator[str]:
+        """Return completion text chunks for a prompt."""
 
 
 class WeComClient(Protocol):
@@ -40,18 +43,22 @@ async def generate_review(
 ) -> dict[str, str]:
     normalized = validate_generation_input(feelings, platform)
     prompt = build_review_prompt(normalized, platform)
-    max_tokens = get_generation_max_tokens(platform)
-    text = (await llm_client.complete(prompt, max_tokens=max_tokens)).strip()
+    text = (await llm_client.complete(prompt)).strip()
     if not text:
-        text = (
-            await llm_client.complete(
-                prompt,
-                max_tokens=max_tokens,
-            )
-        ).strip()
+        text = (await llm_client.complete(prompt)).strip()
     if not text:
         raise RuntimeError("LLM returned empty completion text")
     return {"text": text, "platform": platform}
+
+
+def stream_review(
+    feelings: list[str],
+    platform: str,
+    llm_client: LlmClient,
+) -> AsyncIterator[str]:
+    normalized = validate_generation_input(feelings, platform)
+    prompt = build_review_prompt(normalized, platform)
+    return llm_client.stream_complete(prompt)
 
 
 async def notify_wecom(

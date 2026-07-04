@@ -64,8 +64,8 @@ class ConfigTests(unittest.TestCase):
             os.environ,
             {
                 "FRONTEND_ORIGINS": (
-                    "https://pinme.eth.limo/#/preview/demo-cid, "
-                    "https://sunny-tea-review.pinme.pro"
+                    "http://localhost:5173/demo-path, "
+                    "http://127.0.0.1:5173"
                 ),
             },
             clear=True,
@@ -75,8 +75,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             config.frontend_origins,
             [
-                "https://pinme.eth.limo",
-                "https://sunny-tea-review.pinme.pro",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
             ],
         )
 

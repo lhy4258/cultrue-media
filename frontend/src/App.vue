@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { generateReview, notifyWeCom } from './api';
+import { notifyWeCom, streamReview } from './api';
 
 const feelings = ['服务好', '出餐快', '环境干净', '饮品颜值高', '甜度合适', '店员耐心'];
 
@@ -10,7 +10,7 @@ const platformOptions = {
     hint: '英文评价',
     editorLabel: '评价正文',
     placeholder: '真实模型生成的 Google 评价会显示在这里，也可以直接输入或修改。',
-    generationHint: 'AI 生成会控制在 45-75 个英文词左右，用于减少 token 消耗；手动修改不限长度。',
+    generationHint: 'AI 生成会通过内部提示词控制在 50-100 个英文字符；手动修改不限长度。',
     url: 'https://www.google.com/maps/search/?api=1&query=Sunny%20Tea%20House%20San%20Jose',
   },
   xiaohongshu: {
@@ -18,7 +18,7 @@ const platformOptions = {
     hint: '推荐文案',
     editorLabel: '推荐文案',
     placeholder: '真实模型生成的小红书推荐文案会显示在这里，也可以直接输入或修改。',
-    generationHint: 'AI 生成会控制在 80-140 个中文字符左右，用于减少 token 消耗；手动修改不限长度。',
+    generationHint: 'AI 生成会通过内部提示词控制在 80-300 个中文字符；手动修改不限长度。',
     url: 'https://www.xiaohongshu.com/explore',
   },
 };
@@ -189,19 +189,31 @@ async function handleGenerate() {
   isGenerating.value = true;
   manualCopyNeeded.value = false;
   webhookPreview.value = null;
-  setNotice('正在调用真实模型生成评价...', 'neutral');
+  reviewText.value = '';
+  setNotice('正在流式生成内容...', 'neutral');
 
   try {
-    const result = await generateReview({
-      feelings: selectedFeelings.value,
-      platform: platform.value,
-    });
+    const result = await streamReview(
+      {
+        feelings: selectedFeelings.value,
+        platform: platform.value,
+      },
+      (_chunk, fullText) => {
+        reviewText.value = fullText;
+      },
+    );
     reviewText.value = result.text;
     hasGeneratedReview.value = true;
     saveDraftState();
     setNotice('内容已生成，后续只能手动修改。', 'success');
   } catch (error) {
-    setNotice(error.message || '生成失败，请重试。', 'error');
+    if (reviewText.value.trim()) {
+      hasGeneratedReview.value = true;
+      saveDraftState();
+      setNotice('生成中断，已保留当前内容，可手动修改。', 'warning');
+    } else {
+      setNotice(error.message || '生成失败，请重试。', 'error');
+    }
   } finally {
     isGenerating.value = false;
   }

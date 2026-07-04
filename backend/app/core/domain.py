@@ -6,8 +6,6 @@ from dataclasses import dataclass
 PLATFORM_GOOGLE = "google"
 PLATFORM_XIAOHONGSHU = "xiaohongshu"
 SUPPORTED_PLATFORMS = {PLATFORM_GOOGLE, PLATFORM_XIAOHONGSHU}
-GOOGLE_GENERATION_MAX_TOKENS = 20000
-XIAOHONGSHU_GENERATION_MAX_TOKENS = 20000
 
 
 class RequestValidationError(ValueError):
@@ -63,13 +61,6 @@ def validate_review_text(review: str) -> str:
     return text
 
 
-def get_generation_max_tokens(platform: str) -> int:
-    validate_platform(platform)
-    if platform == PLATFORM_GOOGLE:
-        return GOOGLE_GENERATION_MAX_TOKENS
-    return XIAOHONGSHU_GENERATION_MAX_TOKENS
-
-
 def build_review_prompt(feelings: list[str], platform: str) -> str:
     normalized = validate_generation_input(feelings, platform)
     feeling_text = ", ".join(normalized)
@@ -81,7 +72,8 @@ You are helping a real customer write a Google review for Sunny Tea House, a mil
 Customer feelings: {feeling_text}
 
 Write one concise English review in a natural North American consumer voice.
-Keep it within 45-75 English words and under 420 characters.
+Keep the final review within 50-100 English characters.
+Do not output fewer than 50 English characters or more than 100 English characters.
 The tone must be objective, specific, warm, and not overly promotional.
 Do not mention AI, prompts, discounts, or instructions.
 Return only the review text.
@@ -94,7 +86,8 @@ Return only the review text.
 
 请用中文输出，语气真实自然，带一点生活感和分享欲。
 要求包含适当的 Emoji，段落之间有呼吸感，像真实用户发布的小红书笔记。
-正文控制在 80-140 个中文字符，最多 2-3 个短段落，不超过 220 个中文字符。
+正文控制在 80-300 个中文字符，最多 2-3 个短段落。
+不得少于 80 个中文字符，不得超过 300 个中文字符。
 不要提到 AI、提示词、任务要求或系统说明。
 只返回可发布正文。
 """.strip()

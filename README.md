@@ -1,10 +1,23 @@
 # Sunny Tea House AI 评价生成 Demo
 
-一个移动端 H5 Demo：顾客选择 1-2 个消费感受和发布平台后，后端调用真实大模型生成评价，用户可编辑、一键复制，并在页面内展示企业微信 Webhook 的请求地址、请求方式和 JSON body 拼装结果。
+一个本地运行的移动端 H5 Demo：顾客选择 1-2 个消费感受和发布平台后，后端调用真实大模型生成评价，用户可编辑、一键复制，并在页面内展示企业微信 Webhook 的请求地址、请求方式和 JSON body 拼装结果。
 
 当前交付模式是“真实模型生成 + 前端 Webhook mock”：允许接入真实模型，但不接入真实企业微信机器人。模型密钥只放在后端环境变量中；企业微信部分只在前端演示数据拼装与模拟调用结果，不需要配置真实 `WECOM_WEBHOOK_URL`。
 
-AI 生成长度控制：Google 生成英文评价时会通过 Prompt 和 `max_tokens` 控制在约 45-75 个英文词；小红书生成推荐文案时会控制在约 80-140 个中文字符。这个限制只用于减少模型输出和 token 消耗，不限制用户生成后在文本框里手动修改的最终发布内容长度。每次进入流程只允许成功生成一次，生成后按钮会锁定，后续只能在文本框中手动修改。
+AI 生成长度控制：后端不再给生成请求设置 `max_tokens`，只通过内部 Prompt 限制模型输出字数。Google 英文评价要求不少于 50 个英文字符、最多 100 个英文字符；小红书推荐文案要求不少于 80 个中文字符、最多 300 个中文字符。用户生成后在文本框里手动修改的最终发布内容不限制长度。每次进入流程只允许成功生成一次，生成后按钮会锁定，后续只能在文本框中手动修改。
+
+最近两项生成体验改动：
+
+1. 取消 token 输出预算限制：模型请求体不再发送 `max_tokens`，避免请求层再次限制生成长度。字数约束只写在后端内部 Prompt 中，由模型按平台输出对应长度；前端仅展示当前正文长度，不限制用户手动修改后的最终内容。
+2. 增加流式输出：前端主流程改为调用 `/api/generate-review-stream`。后端请求模型时使用 OpenAI-compatible `stream: true`，把模型返回的 `delta.content` 转成 SSE 事件；前端用 `ReadableStream` 边读边把文本追加到编辑框，用户不需要等完整响应结束才看到正文。
+
+本地访问地址：
+
+```text
+前端：http://127.0.0.1:5173
+后端：http://127.0.0.1:8000
+健康检查：http://127.0.0.1:8000/api/health
+```
 
 ## 项目结构
 
@@ -119,7 +132,7 @@ pnpm dev
 http://127.0.0.1:5173
 ```
 
-前端生成内容会通过 Vite 代理调用后端 `/api/generate-review`，完整生成流程需要先启动后端，并在 `backend/.env` 中配置可用的 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`。如果没有配置模型 Key，页面会显示可重试的中文错误提示；复制后的企业微信 Webhook 展示仍由前端 mock 完成。生成成功后不能再次生成，只能手动修改文本框内容。
+前端生成内容会通过 Vite 代理调用后端 `/api/generate-review-stream`，模型文本会以流式片段实时追加到文本框。完整生成流程需要先启动后端，并在 `backend/.env` 中配置可用的 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`。如果没有配置模型 Key，页面会显示可重试的中文错误提示；如果流式生成中断但已经收到部分文本，页面会保留当前内容并提示可手动修改。复制后的企业微信 Webhook 展示仍由前端 mock 完成。生成成功后不能再次生成，只能手动修改文本框内容。旧的 `/api/generate-review` 非流式接口保留用于兼容和调试。
 
 前端常用文件路径：
 
@@ -131,10 +144,10 @@ http://127.0.0.1:5173
 前端样式文件：C:\Users\36183\Desktop\boss\culture media\frontend\src\styles.css
 ```
 
-本地开发时，Vite 已经把 `/api` 代理到 `http://127.0.0.1:8000`。如果前端和后端分开部署，复制 `frontend/.env.production.example` 为 `frontend/.env.production`，再填线上后端地址：
+本地开发时，Vite 已经把 `/api` 代理到 `http://127.0.0.1:8000`。如果需要本地构建后预览，也可以复制 `frontend/.env.production.example` 为 `frontend/.env.production`，保持后端地址为本机回环地址：
 
 ```text
-VITE_API_BASE_URL=https://your-python-backend.example.com
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 ## 测试
@@ -159,62 +172,38 @@ cd frontend
 pnpm build
 ```
 
-## 发布方案
+## 本地回环访问说明
 
-没有自有域名也可以发布。推荐保持当前前后端分离结构：
-
-```text
-前端：PinMe 静态上传 frontend/dist/
-后端：Render、Railway 或其他 Python Web Service 平台
-数据库：后端平台托管 PostgreSQL，或其他公网 PostgreSQL
-```
-
-先发布后端，使用平台自动生成的公开地址即可，例如 `https://your-backend.onrender.com` 或 Railway 生成的域名。后端平台配置：
+当前已解除 Render 后端和 PinMe 前端部署，项目恢复为本机运行方式：
 
 ```text
-Root Directory: backend
-Python Version: 3.11
-Build Command: pip install -r requirements.txt
-Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+前端：http://127.0.0.1:5173
+后端：http://127.0.0.1:8000
+前端调用后端：开发环境通过 Vite proxy 转发 /api 到 http://127.0.0.1:8000
+数据库：本地 Docker PostgreSQL，地址为 127.0.0.1:5432
 ```
 
-后端线上环境变量至少填写：
+后端 CORS 只需要允许本地前端：
 
 ```text
-LLM_API_KEY=真实模型key
-LLM_BASE_URL=模型base_url
-LLM_MODEL=模型名
-LLM_TIMEOUT_SECONDS=30
-DATABASE_URL=线上PostgreSQL连接串
-API_RATE_LIMIT_PER_MINUTE=12
-LLM_DAILY_REQUEST_WARNING_LIMIT=100
-API_USAGE_LOG_PATH=logs/api-usage.jsonl
-FRONTEND_ORIGINS=https://pinme.eth.limo
+FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-`FRONTEND_ORIGINS` 填前端访问链接的 origin。比如 PinMe 预览链接是 `https://pinme.eth.limo/#/preview/xxx`，这里填 `https://pinme.eth.limo` 即可；如果不确定，也可以先粘完整链接，后端会自动取 origin。
-
-后端发布后先访问：
+本地生产构建配置：
 
 ```text
-https://你的后端平台地址/api/health
+frontend/.env.production
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-再配置前端生产环境。复制 `frontend/.env.production.example` 为 `frontend/.env.production`，并填写后端平台地址：
-
-```text
-VITE_API_BASE_URL=https://你的后端平台地址
-```
-
-Vue/Vite 前端构建产物位于 `frontend/dist/`，可作为 PinMe 静态上传目标：
+本地构建检查：
 
 ```powershell
-cd frontend
+cd "C:\Users\36183\Desktop\boss\culture media\frontend"
 pnpm build
-pinme upload dist
 ```
 
-PinMe 会输出一个可访问链接，直接用这个链接演示即可，不需要购买域名。当前交付不配置真实企业微信 Webhook。
+当前交付不配置真实企业微信 Webhook。
 
 ## 数据库与新评论接口
 
@@ -271,15 +260,13 @@ docker exec backend-postgres-1 psql -U postgres -d culture_media -c "SELECT id, 
 
 ## 未完成事项
 
-当前本地 Demo 主流程已改为真实模型生成、前端 mock 企业微信 Webhook，剩余未完成内容主要集中在真实外部配置、正式上线和最终交付验收：
+当前 Demo 主流程已恢复为本地运行，剩余内容主要是后续扩展或正式运营增强：
 
-- 真实模型调用验证：已允许接入真实模型；需要在 `backend/.env` 配置可用的 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 后，用真实账号完成一次生成验收。
 - 真实企微推送：当前不作为交付目标，不接入真实企业微信机器人；前端只展示 Webhook payload 拼装和 mock 调用结果。
 - 真实评论来源：后端已有 `/api/incoming-review` 接口，但还没有接 Google Business Profile API、小红书或其他真实评论来源。
-- 生产部署：前端可构建为 `frontend/dist/`，后端还需要确认 Render、Fly、Railway、云函数等 Python 服务部署方案。
+- 数据库扩展：本地 Docker PostgreSQL 已预留 `culture_media.public.reviews` 表；当前主流程不强依赖数据库。
 - 平台入口：Google 当前使用搜索/地图入口，小红书当前使用网页入口；如拿到更准确的商家评论链接、Place ID 或小红书 App 链接，需要再替换。
-- 正式验收截图：真实模型 Key 配好后，需要重新完成“选择感受 -> 生成 -> 编辑 -> 复制并模拟 Webhook -> 平台跳转”的完整闭环截图。
-- 上线安全：已补基础内存限流、调用日志和每日请求量告警；正式公开前仍建议接入网关级限流、持久化监控和成本告警通知。
+- 安全与成本：已补基础内存限流、调用日志和每日请求量告警；如果后续重新公开部署，仍建议接入网关级限流、持久化监控和成本告警通知。
 - 正式交付 PDF：当前交付文档是 Markdown，若最终要求 PDF，需要再按字体规则导出并检查版式。
 
 详细清单见：

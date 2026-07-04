@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import AppConfig, load_config
@@ -11,7 +14,7 @@ from app.core.usage_guard import ModelUsageGuard, UsageDecision
 from app.integrations.llm import OpenAICompatibleClient
 from app.integrations.wecom import WeComWebhookClient
 from app.repositories.reviews import PostgresReviewRepository
-from app.services.review_service import generate_review, notify_wecom, process_incoming_review
+from app.services.review_service import generate_review, notify_wecom, process_incoming_review, stream_review
 
 
 class GenerateReviewRequest(BaseModel):
@@ -71,6 +74,38 @@ async def generate_review_endpoint(payload: GenerateReviewRequest, request: Requ
     except RuntimeError as exc:
         _finish_model_request(usage, success=False, status_code=502, error=str(exc))
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/generate-review-stream")
+async def generate_review_stream_endpoint(payload: GenerateReviewRequest, request: Request) -> StreamingResponse:
+    config = load_config()
+    usage = _begin_model_request(
+        config=config,
+        request=request,
+        endpoint="/api/generate-review-stream",
+        platform=payload.platform,
+        feelings_count=len(payload.feelings),
+    )
+    llm_client = OpenAICompatibleClient(
+        api_key=config.llm_api_key,
+        base_url=config.llm_base_url,
+        model=config.llm_model,
+        timeout_seconds=config.llm_timeout_seconds,
+    )
+    try:
+        chunks = stream_review(payload.feelings, payload.platform, llm_client)
+    except RequestValidationError as exc:
+        _finish_model_request(usage, success=False, status_code=400, error=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StreamingResponse(
+        _stream_sse_events(chunks=chunks, usage=usage, platform=payload.platform),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/notify-wecom")
@@ -218,3 +253,34 @@ def _client_id(request: Request) -> str:
     if request.client is None:
         return "unknown"
     return request.client.host
+
+
+async def _stream_sse_events(
+    *,
+    chunks: AsyncIterator[str],
+    usage: UsageDecision,
+    platform: str,
+) -> AsyncIterator[str]:
+    has_text = False
+    try:
+        async for chunk in chunks:
+            if not chunk:
+                continue
+            has_text = True
+            yield _sse_event("chunk", {"text": chunk})
+        if not has_text:
+            raise RuntimeError("LLM returned empty completion text")
+        _finish_model_request(usage, success=True, status_code=200)
+        yield _sse_event("done", {"platform": platform})
+    except RuntimeError as exc:
+        _finish_model_request(usage, success=False, status_code=502, error=str(exc))
+        yield _sse_event("error", {"message": str(exc)})
+    except Exception as exc:
+        message = "Unexpected stream error"
+        _finish_model_request(usage, success=False, status_code=500, error=f"{message}: {exc}")
+        yield _sse_event("error", {"message": message})
+
+
+def _sse_event(event: str, data: dict[str, object]) -> str:
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {payload}\n\n"

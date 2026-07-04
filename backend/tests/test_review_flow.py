@@ -8,19 +8,32 @@ from app.core.domain import (
     build_review_prompt,
     validate_generation_input,
 )
-from app.services.review_service import generate_review, notify_wecom, process_incoming_review
+from app.services.review_service import generate_review, notify_wecom, process_incoming_review, stream_review
 
 
 class FakeLlmClient:
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []
-        self.max_tokens = []
 
-    async def complete(self, prompt, max_tokens=None):
+    async def complete(self, prompt):
         self.prompts.append(prompt)
-        self.max_tokens.append(max_tokens)
         return self.responses.pop(0)
+
+
+class FakeStreamingLlmClient:
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.prompts = []
+
+    async def complete(self, prompt):
+        self.prompts.append(prompt)
+        return "".join(self.chunks)
+
+    async def stream_complete(self, prompt):
+        self.prompts.append(prompt)
+        for chunk in self.chunks:
+            yield chunk
 
 
 class FakeWeComClient:
@@ -61,8 +74,7 @@ class ReviewFlowTests(unittest.TestCase):
         self.assertIn("English", prompt)
         self.assertIn("North American", prompt)
         self.assertIn("objective", prompt)
-        self.assertIn("45-75 English words", prompt)
-        self.assertIn("under 420 characters", prompt)
+        self.assertIn("50-100 English characters", prompt)
         self.assertIn("服务好, 环境干净", prompt)
 
     def test_xiaohongshu_prompt_targets_chinese_seed_note_style(self):
@@ -73,11 +85,10 @@ class ReviewFlowTests(unittest.TestCase):
         self.assertIn("中文", prompt)
         self.assertIn("Emoji", prompt)
         self.assertIn("呼吸感", prompt)
-        self.assertIn("80-140 个中文字符", prompt)
-        self.assertIn("不超过 220 个中文字符", prompt)
+        self.assertIn("80-300 个中文字符", prompt)
         self.assertIn("饮品颜值高", prompt)
 
-    def test_generate_review_returns_llm_text_and_platform_with_20000_token_cap(self):
+    def test_generate_review_returns_llm_text_and_platform_without_token_cap(self):
         llm = FakeLlmClient([" Great service and a clean space. "])
 
         result = asyncio.run(generate_review(["服务好"], PLATFORM_GOOGLE, llm))
@@ -87,7 +98,6 @@ class ReviewFlowTests(unittest.TestCase):
             {"text": "Great service and a clean space.", "platform": PLATFORM_GOOGLE},
         )
         self.assertIn("Google", llm.prompts[0])
-        self.assertEqual(llm.max_tokens, [20000])
 
     def test_generate_review_retries_once_when_model_returns_empty_text(self):
         llm = FakeLlmClient(["   ", " Great service and a clean space. "])
@@ -98,15 +108,28 @@ class ReviewFlowTests(unittest.TestCase):
             result,
             {"text": "Great service and a clean space.", "platform": PLATFORM_GOOGLE},
         )
-        self.assertEqual(llm.max_tokens, [20000, 20000])
+        self.assertEqual(len(llm.prompts), 2)
 
-    def test_generate_xiaohongshu_uses_20000_token_cap(self):
+    def test_generate_xiaohongshu_without_token_cap(self):
         llm = FakeLlmClient([" 今天喝到一杯很清爽的奶茶，出餐快，颜值也在线～ "])
 
         result = asyncio.run(generate_review(["出餐快"], PLATFORM_XIAOHONGSHU, llm))
 
         self.assertEqual(result["platform"], PLATFORM_XIAOHONGSHU)
-        self.assertEqual(llm.max_tokens, [20000])
+
+    def test_stream_review_yields_llm_chunks(self):
+        llm = FakeStreamingLlmClient(["Great", " service"])
+
+        async def collect_chunks():
+            chunks = []
+            async for chunk in stream_review(["服务好"], PLATFORM_GOOGLE, llm):
+                chunks.append(chunk)
+            return chunks
+
+        result = asyncio.run(collect_chunks())
+
+        self.assertEqual(result, ["Great", " service"])
+        self.assertIn("Google", llm.prompts[0])
 
     def test_notify_wecom_sends_summary_and_reply_draft(self):
         llm = FakeLlmClient(

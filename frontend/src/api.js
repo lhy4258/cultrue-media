@@ -37,6 +37,108 @@ async function postJson(path, payload) {
   return response.json();
 }
 
+async function postStream(path, payload, onChunk) {
+  let response;
+  try {
+    response = await fetch(apiUrl(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw new Error(toFriendlyError(error.message || 'Failed to fetch'));
+  }
+
+  if (!response.ok) {
+    let message = `Request failed with ${response.status}`;
+    try {
+      const data = await response.json();
+      message = data.detail || data.error || message;
+    } catch {
+      message = response.statusText || message;
+    }
+    throw new Error(toFriendlyError(message));
+  }
+
+  if (!response.body) {
+    throw new Error('浏览器不支持流式读取，请稍后重试。');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  function handleEventBlock(block) {
+    const lines = block.split('\n');
+    const eventLine = lines.find((line) => line.startsWith('event:'));
+    const dataLines = lines.filter((line) => line.startsWith('data:'));
+    const eventName = eventLine ? eventLine.replace('event:', '').trim() : 'message';
+    const rawData = dataLines.map((line) => line.replace('data:', '').trim()).join('\n');
+
+    if (!rawData) {
+      return;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(rawData);
+    } catch {
+      throw new Error('模型流式响应格式错误，请稍后重试。');
+    }
+
+    if (eventName === 'chunk') {
+      const chunk = typeof data.text === 'string' ? data.text : '';
+      if (chunk) {
+        fullText += chunk;
+        onChunk(chunk, fullText);
+      }
+      return;
+    }
+
+    if (eventName === 'error') {
+      throw new Error(toFriendlyError(data.message || '生成失败，请重试。'));
+    }
+  }
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
+
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary).trim();
+        buffer = buffer.slice(boundary + 2);
+        if (block) {
+          handleEventBlock(block);
+        }
+        boundary = buffer.indexOf('\n\n');
+      }
+
+      if (done) {
+        break;
+      }
+    }
+
+    const finalBlock = buffer.trim();
+    if (finalBlock) {
+      handleEventBlock(finalBlock);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const text = fullText.trim();
+  if (!text) {
+    throw new Error('模型返回内容为空，请稍后重试或检查模型配置。');
+  }
+  return {
+    text,
+    platform: payload.platform,
+  };
+}
+
 function toFriendlyError(message) {
   if (message.includes('LLM_API_KEY is not configured')) {
     return '后端未配置 LLM_API_KEY，请在 backend/.env 中填写模型密钥后重试。';
@@ -122,6 +224,10 @@ export async function generateReview(payload) {
     ...result,
     text,
   };
+}
+
+export async function streamReview(payload, onChunk) {
+  return postStream('/api/generate-review-stream', payload, onChunk);
 }
 
 export async function notifyWeCom(payload) {
